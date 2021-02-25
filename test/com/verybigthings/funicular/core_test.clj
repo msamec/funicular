@@ -20,7 +20,7 @@
 (defn right-even? [{:keys [data]}]
   (even? (:right data)))
 
-(deftest ast
+(deftest basic
   (let [api      {:context [:foo {:commands {:bar {:input-schema :any
                                                    :output-schema :any
                                                    :handler (fn [_] 2)}}}
@@ -36,7 +36,8 @@
                   :pipes {[:foo/bar :foo.bar/query] (fn [request]
                                                       (let [command-res (get-in request [:command :response])]
                                                         (assoc-in request [:data :right] command-res)))}}
-        compiled (core/compile api {:schema-registry schema-registry})]
-    (println (core/execute compiled {} {:command [:foo/bar {}]
-                                        :queries {:some-alias [:foo.bar/query {:left 1}]}}))
-    (is (= 1 2))))
+        compiled (core/compile api {:schema-registry schema-registry})
+        res (core/execute compiled {} {:command [:foo/bar {}]
+                                       :queries {:some-alias [:foo.bar/query {:left 1}]}})]
+    (is {:command [:foo/bar 2], :queries {:some-alias [:foo.bar/query 3]}}
+      res)))
