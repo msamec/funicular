@@ -177,5 +177,6 @@
                                         :handler handler}
                              :assign-self {:input-schema :any
                                            :output-schema :any
-                                           :handler handler}}}]]]]}]
+                                           :handler handler}}}]]]]}
+        compiled (core/compile api {:schema-registry schema-registry})]
     (is true)))

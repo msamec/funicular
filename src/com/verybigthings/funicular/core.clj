@@ -225,7 +225,8 @@
 (defn with-subcontexts [acc {:keys [subcontexts]} opts]
   (reduce
     (fn [acc' subcontext]
-      (compile-context acc' subcontext opts))
+      (let [resolvers (:resolvers (compile-context acc' subcontext opts))]
+        (update acc' :resolvers merge resolvers)))
     acc
     subcontexts))
 
