@@ -3,180 +3,131 @@
             [clojure.spec.alpha :as s]
             [com.verybigthings.funicular.core :as core]
             [malli.core :as m]
-            ))
+            [expound.alpha :as expound]))
+
+(set! s/*explain-out* expound/printer)
 
 (s/check-asserts true)
+
+(def db* (atom nil))
+
+(defn clear-db-fixture [f]
+  (reset! db* nil)
+  (f))
+
+(use-fixtures :each clear-db-fixture)
+
+(def uuid-1 (java.util.UUID/fromString "a60f3aa2-876c-11eb-8dcd-0242ac130003"))
 
 (def schema-registry
   (merge
     (m/default-schemas)
-    {}))
+    {:app/token :string
+     :app/pong [:and
+                :keyword
+                [:fn #(= % :pong)]]
+     :app/session [:map
+                   :user/id
+                   :app/token]
 
-(defn baz-bar [])
+     :app.input/token [:map
+                       [:app/token {:optional true}]]
 
-(defn left-odd? [{:keys [data] :as req}]
-  (odd? (:left data)))
+     :app.input/register [:and
+                          :app/user
+                          [:map
+                           :user/password2]
+                          [:fn {:error/message "passwords don't match"
+                                :error/path [:user/password2]}
+                           (fn [{:user/keys [password password2]}]
+                             (= password password2))]]
 
-(defn right-even? [{:keys [data]}]
-  (even? (:right data)))
+     :app.input.articles/create [:map
+                                 :app/article]
 
-(deftest basic
-  (let [api      {:context [:foo {:commands {:bar {:input-schema :any
-                                                   :output-schema :any
-                                                   :handler (fn [_] 2)}}}
-                            [:bar {:rules left-odd?
-                                   :queries {:query {:input-schema :any
-                                                     :output-schema :any
-                                                     :rules [:and left-odd? right-even?
-                                                             [:or
-                                                              [:and (constantly true) [:not (constantly false)]]
-                                                              (constantly false)]
-                                                             [:not (constantly false)]]
-                                                     :handler (fn [{:keys [data]}]
-                                                                (+ (:left data) (:right data)))}}}]]
-                  :pipes {[:foo/bar :foo.bar/query] (fn [request]
-                                                      (let [command-res (get-in request [:command :response])]
-                                                        (assoc-in request [:data :right] command-res)))}}
-        compiled (core/compile api {:schema-registry schema-registry})
-        res (core/execute compiled {} {:command [:foo/bar {}]
-                                       :queries {:some-alias [:foo.bar/query {:left 1}]}})]
-    (is (= {:command [:foo/bar 2], :queries {:some-alias [:foo.bar/query 3]}} res))))
 
-(defn assigned-to-department? [])
-(defn active-charge? [])
-(defn in-care-team? [])
-(defn task-owner? [])
-(defn task-assignable? [])
-(defn needs-discharge? [])
-(defn charge-rn? [])
-(defn bedside-nurse? [])
-(defn bedside-sitter? [])
-(defn aide? [])
-(defn virtual-nurse? [])
-(defn virtual-sitter? [])
-(defn case-manager? [])
-(defn sync-lead? [])
-(defn admin? [])
-(defn logged-in? [])
-(defn assigning-self-to-room-pool? [])
-(defn call-in-room? [])
+     :app/user [:map
+                :user/email
+                :user/password]
 
-(defn handler [])
+     :app/article [:map
+                   :article/title]
 
-(deftest health-system
-  (let [api {:context
-             [:health-system
-              {:rules logged-in?
-               :commands {:set-availability {:input-schema :any
-                                             :output-schema :any
-                                             :rules virtual-nurse?
-                                             :handler handler}}}
-              [:room-pool
-               {:commands {:assign {:input-schema :any
-                                    :output-schema :any
-                                    :rules [:or sync-lead?
-                                            [:and virtual-nurse? assigning-self-to-room-pool?]]
-                                    :handler handler}}}
-               [:administration
-                {:rules sync-lead?
-                 :commands {:create {:input-schema :any
-                                     :output-schema :any
-                                     :handler handler}
-                            :add-nodes {:input-schema :any
-                                        :output-schema :any
-                                        :handler handler}
-                            :remove-nodes {:input-schema :any
-                                           :output-schema :any
-                                           :handler handler}
-                            :deactivate {:input-schema :any
-                                         :output-schema :any
-                                         :handler handler}}}]]
-              [:department
-               {:rules charge-rn?
-                :commands {:export-shift-data {:input-schema :any
-                                               :output-schema :any
-                                               :handler handler}
-                           :export-encounter-data {:input-schema :any
-                                                   :output-schema :any
-                                                   :handler handler}
-                           :switch-active-charge {:input-schema :any
-                                                  :output-schema :any
-                                                  :rules active-charge?
-                                                  :handler handler}}}
-               [:encounter
-                {:commands {:update-discharge-plan {:input-schema :any
-                                                    :output-schema :any
-                                                    :rules [:or
-                                                            bedside-sitter?
-                                                            virtual-nurse?
-                                                            case-manager?
-                                                            [:and assigned-to-department?
-                                                             [:or charge-rn? bedside-nurse? aide?]]]
-                                                    :handler handler}
-                            :set-call-in-room {:input-schema :any
-                                               :output-schema :any
-                                               :rules [:or
-                                                       [:and charge-rn? active-charge?]
-                                                       [:and in-care-team? [:or bedside-nurse? aide?]]]
-                                               :handler handler}
-                            :list-notes {:input-schema :any
-                                         :output-schema :any
-                                         :handler handler}
-                            :add-note {:input-schema :any
-                                       :output-schema :any
-                                       :rules [:or
-                                               charge-rn?
-                                               [:and in-care-team? [:or bedside-nurse? aide?]]]
-                                       :handler handler}
-                            :call-room {:input-schema :any
-                                        :output-schema :any
-                                        :rules [:and call-in-room? virtual-nurse? in-care-team?]
-                                        :handler handler}}}
-                [:<>
-                 {:rules [:and charge-rn? active-charge?]
-                  :commands {:start-admission {:input-schema :any
-                                               :output-schema :any
-                                               :handler handler}
-                             :start-transfer {:input-schema :any
-                                              :output-schema :any
-                                              :handler handler}
-                             :start-discharge {:input-schema :any
-                                               :output-schema :any
-                                               :rules needs-discharge?
-                                               :handler handler}
-                             :schedule-shift {:input-schema :any
-                                              :output-schema :any
-                                              :handler handler}}}]
-                [:patient
-                 {:commands {:edit {:input-schema :any
-                                    :output-schema :any
-                                    :handler handler}
-                             :change-room {:input-schema :any
-                                           :output-schema :any
-                                           :handler handler}}}]
-                [:task
-                 {:commands {:defer {:input-schema :any
-                                     :output-schema :any
-                                     :rules [:or
-                                             [:and charge-rn? assigned-to-department?]
-                                             [:and task-owner? [:or bedside-nurse? aide? virtual-nurse?]]]
-                                     :handler handler}
-                             :update-status {:input-schema :any
-                                             :output-schema :any
-                                             :rules [:and
-                                                     task-assignable?
-                                                     [:or
-                                                      charge-rn?
-                                                      [:and task-owner? [:or bedside-nurse? aide? virtual-nurse?]]]]
-                                             :handler handler}
-                             :add-note {:input-schema :any
-                                        :output-schema :any
-                                        :rules [:or
-                                                [:and charge-rn? active-charge?]
-                                                [:and in-care-team? [:or bedside-nurse? aide?]]]
-                                        :handler handler}
-                             :assign-self {:input-schema :any
-                                           :output-schema :any
-                                           :handler handler}}}]]]]}
-        compiled (core/compile api {:schema-registry schema-registry})]
-    (is true)))
+     :article/title :string
+     :user/id :uuid
+     :user/email :string
+     :user/password [:and
+                     :string
+                     [:fn {:error/message "password is too short"} #(<= 8 (count %))]]
+     :user/password2 :user/password}))
+
+(defn register [{:keys [data]}]
+  (let [{:user/keys [email password]} data
+        token "TOKEN-1"]
+    (swap! db* #(-> %
+                  (assoc-in [:users uuid-1] {:user/id uuid-1 :user/email email :user/password password})
+                  (assoc-in [:tokens token] uuid-1)))
+    {:user/id uuid-1
+     :app/token token}))
+
+(defn create-article [{:keys [data]}]
+  (:app/article data))
+
+(defn assoc-current-user [ctx]
+  (let [token (get-in ctx [:request :data :app/token])
+        user-id (get-in @db* [:tokens token])]
+    (assoc-in ctx [:request :current-user] (get-in @db* [:users user-id]))))
+
+(defn logged-in? [req]
+  (-> req :current-user boolean))
+
+(def funicular-1
+  {:api [:api
+         {:interceptors [{:enter assoc-current-user}]
+          :input-schema :app.input/token
+          :commands {:ping {:input-schema :map
+                            :output-schema :app/pong
+                            :handler (fn [_] :pong)}}}
+         [:session
+          {:input-schema :app.input/register
+           :commands {:register {:input-schema :app.input/register
+                                 :output-schema :app/session
+                                 :handler register}}}]
+         [:articles
+          {:rules logged-in?
+           :commands {:create {:input-schema :app.input.articles/create
+                               :output-schema :app/article
+                               :handler create-article}}}]]})
+
+(deftest ping
+  (let [f (core/compile funicular-1 {:malli/registry schema-registry})]
+    (is (= {:command [:api/ping :pong]}
+          (core/execute f {} {:command [:api/ping {}]})))))
+
+(deftest register
+  (let [f (core/compile funicular-1 {:malli/registry schema-registry})]
+    (is (= {:command [:api.session/register {:app/token "TOKEN-1"
+                                             :user/id uuid-1}]}
+          (core/execute f {} {:command [:api.session/register {:user/email "email@example.com"
+                                                               :user/password "12345678"
+                                                               :user/password2 "12345678"}]})))))
+
+(deftest register-error
+  (let [f (core/compile funicular-1 {:malli/registry schema-registry})]
+    (is (= {:command [:api.session/register {:funicular/errors {[:user/password] ["password is too short"],
+                                                                [:user/password2] ["password is too short"
+                                                                                   "passwords don't match"]}
+                                             :funicular.anomaly/category :funicular.anomaly.category/incorrect
+                                             :funicular.anomaly/message "Invalid input"
+                                             :funicular.anomaly/subcategory :funicular.anomaly.category.incorrect/input-data}]}
+          (core/execute f {} {:command [:api.session/register {:user/email "email@example.com"
+                                                               :user/password "1234567"
+                                                               :user/password2 "123456"}]})))))
+(deftest interceptors-rules
+  (let [f (core/compile funicular-1 {:malli/registry schema-registry})
+        {[_ {:app/keys [token]}] :command} (core/execute f {} {:command [:api.session/register {:user/email "email@example.com"
+                                                                                                :user/password "12345678"
+                                                                                                :user/password2 "12345678"}]})
+        res (core/execute f {} {:command [:api.articles/create {:app/article {:article/title "My article"}
+                                                                :app/token token}]})]
+    (is (= {:command [:api.articles/create {:article/title "My article"}]} res))))

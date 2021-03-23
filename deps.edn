@@ -5,8 +5,10 @@
         fmnoise/flow {:mvn/version "4.0.0"}}
  :aliases
  {:test {:extra-paths ["test"]
-         :extra-deps {lambdaisland/kaocha {:mvn/version "1.0.732"}}
-         :jvm-opts ["-Dmalli.registry/type=custom"]}
+         :extra-deps {lambdaisland/kaocha {:mvn/version "1.0.732"}
+                      expound/expound {:mvn/version "0.8.9"}}
+         ;;:jvm-opts ["-Dmalli.registry/type=custom"]
+         }
   :runner
   {:extra-deps {com.cognitect/test-runner
                 {:git/url "https://github.com/cognitect-labs/test-runner"
