@@ -226,14 +226,14 @@
               schemas)]
     (fn [data]
       (let [errors (reduce
-                      (fn [acc {:keys [explainer validator]}]
-                        (if (validator data)
-                          acc
-                          (->> data
-                            explainer
-                            (humanize acc))))
-                      {}
-                      ves)]
+                     (fn [acc {:keys [explainer validator]}]
+                       (if (validator data)
+                         acc
+                         (->> data
+                           explainer
+                           (humanize acc))))
+                     {}
+                     ves)]
         (->> errors
           (mapv (fn [[k v]] [k (-> v sort vec)]))
           (into {}))))))
@@ -317,6 +317,8 @@
         (assoc-in acc' [:resolvers namespaced-resolver-name] {:chain (into [root-error-interceptor] interceptors)
                                                               :input-schemas input-schemas
                                                               :output-schemas output-schemas
+                                                              :input-schema (last input-schemas)
+                                                              :output-schema (last output-schemas)
                                                               :path (:path acc)
                                                               :name resolver-name
                                                               :ns-name namespaced-resolver-name
@@ -414,3 +416,10 @@
   (-> {}
     (execute-command compiled context request)
     (execute-queries compiled context request)))
+
+(defn inspect [compiled]
+  (->> compiled
+    :resolvers
+    (map (fn [[k v]] [k (select-keys v [:input-schemas :input-schema :output-schemas :output-schema :type])]))
+    (sort-by (fn [[k _]] (str k)))
+    vec))

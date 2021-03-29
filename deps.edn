@@ -1,8 +1,15 @@
 {:paths ["src" "resources"]
  :deps {org.clojure/clojure {:mvn/version "1.10.1"}
-        metosin/malli {:mvn/version "0.3.0-SNAPSHOT"}
+        metosin/malli {:mvn/version "0.3.0"}
         metosin/sieppari {:mvn/version "0.0.0-alpha13"}
-        fmnoise/flow {:mvn/version "4.0.0"}}
+        com.cognitect/transit-clj {:mvn/version "1.0.324"}
+        com.cognitect/transit-cljs {:mvn/version "0.8.264"}
+        tick/tick {:mvn/version "0.4.30-alpha"}
+        funcool/promesa {:mvn/version "5.1.0"}
+        org.clojure/core.async {:mvn/version "0.7.559"}
+        keechma/next {:mvn/version "0.0.8"}
+        keechma/pipelines {:mvn/version "0.0.6"}
+        lambdaisland/fetch {:mvn/version "0.0.23"}}
  :aliases
  {:test {:extra-paths ["test"]
          :extra-deps {lambdaisland/kaocha {:mvn/version "1.0.732"}
