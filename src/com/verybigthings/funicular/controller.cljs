@@ -8,6 +8,7 @@
             [com.verybigthings.funicular.transit :as funicular-transit]
             [cognitect.transit :as transit]
             [keechma.pipelines.core :refer [in-pipeline?] :refer-macros [pipeline!]]
+            [keechma.pipelines.runtime :refer [pipeline?]]
             [goog.object :as gobj])
   (:require-macros [cljs.core.async.macros :refer [go-loop go]]))
 
@@ -226,12 +227,12 @@
                    (doseq [[d ids] deferred->ids]
                      (let [d-id->aliases (get id->aliases d)
                            d-res (reduce
-                                          (fn [acc id]
-                                            (let [r (get queries id)
-                                                  aliases (get d-id->aliases id)]
-                                              (reduce #(assoc %1 %2 r) acc aliases)))
-                                          {}
-                                          ids)
+                                   (fn [acc id]
+                                     (let [r (get queries id)
+                                           aliases (get d-id->aliases id)]
+                                       (reduce #(assoc %1 %2 r) acc aliases)))
+                                   {}
+                                   ids)
                            payload {:queries d-res :command command}]
                        (if (and (= d deferred) is-called-from-pipeline)
                          (p/resolve! d (get-resolve-pipeline command-name payload))
@@ -334,7 +335,10 @@
    (command! ctrl command-name payload nil))
   ([ctrl command-name payload default]
    (->> (req! ctrl (command command-name payload))
-     (p/map #(get-command % default)))))
+     (p/map (fn [res]
+              (if (pipeline? res)
+                (update-in res [:pipeline :begin] conj (fn [value _] (get-command value default)))
+                (get-command res default)))))))
 
 (defn attach-query!
   ([value query-name payload]
