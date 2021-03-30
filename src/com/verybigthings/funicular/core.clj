@@ -7,7 +7,8 @@
             [sieppari.core :as si]
             [sieppari.context :as sic]
             [clojure.string :as str]
-            [com.verybigthings.funicular.anomalies :as anom]))
+            [com.verybigthings.funicular.anomalies :as anom]
+            [clojure.pprint]))
 
 (defn deep-merge-malli-errors [a b]
   (merge-with (fn [x y]
