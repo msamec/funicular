@@ -2,6 +2,7 @@
   "Connect time-literals to transit."
   (:require [time-literals.read-write]
             [cognitect.transit :as transit]
+            #?(:cljs [com.cognitect.transit.types :as ty])
             #?(:cljs [java.time :refer [Period
                                         LocalDate
                                         LocalDateTime
@@ -31,6 +32,9 @@
                               Duration
                               Year
                               YearMonth))))
+#?(:cljs
+   (extend-type ty/UUID
+     IUUID))
 
 (def time-classes
   {'period Period
@@ -51,8 +55,8 @@
 (def write-handlers
   {:handlers
    (into {}
-     (for [[tick-class host-class] time-classes]
-       [host-class (transit/write-handler (constantly (name tick-class)) str)]))})
+         (for [[tick-class host-class] time-classes]
+           [host-class (transit/write-handler (constantly (name tick-class)) str)]))})
 
 (def read-handlers
   {:handlers

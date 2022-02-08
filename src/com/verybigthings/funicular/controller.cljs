@@ -4,13 +4,16 @@
             [keechma.next.protocols :as keechma-pt]
             [promesa.core :as p]
             [cljs.core.async :refer [chan timeout <! close! alts! put!]]
-            [tick.alpha.api :as t]
             [com.verybigthings.funicular.transit :as funicular-transit]
             [cognitect.transit :as transit]
             [keechma.pipelines.core :refer [in-pipeline?] :refer-macros [pipeline!]]
             [keechma.pipelines.runtime :refer [pipeline?]]
-            [goog.object :as gobj])
+            [goog.object :as gobj]
+            [keechma.next.toolbox.logging :as l])
   (:require-macros [cljs.core.async.macros :refer [go-loop go]]))
+
+;; https://developers.google.com/closure/compiler/docs/js-for-compiler
+(def ^boolean debug-enabled? "@define {boolean}" ^boolean goog/DEBUG)
 
 (defn hijack-command-deferred-then-and-catch [ctrl request-payload d]
   (let [{[command-name _] :command} request-payload
@@ -28,15 +31,15 @@
                                     (get-in state [:fulfilled on-fulfilled])
                                     (let [{:keys [command]} payload]
                                       (ctrl/transact
-                                        ctrl
-                                        (fn []
-                                          (let [fulfilled (reduce
-                                                            (fn [m f] (assoc m f (f payload)))
-                                                            {}
-                                                            (:on-fulfilled state))]
-                                            (vswap! state* assoc :committed? true :fulfilled fulfilled)
-                                            (ctrl/broadcast ctrl [:funicular/after command-name] {:command command})
-                                            (get fulfilled on-fulfilled))))))))))
+                                       ctrl
+                                       (fn []
+                                         (let [fulfilled (reduce
+                                                           (fn [m f] (assoc m f (f payload)))
+                                                           {}
+                                                           (:on-fulfilled state))]
+                                           (vswap! state* assoc :committed? true :fulfilled fulfilled)
+                                           (ctrl/broadcast ctrl [:funicular/after command-name] {:command command})
+                                           (get fulfilled on-fulfilled))))))))))
         wrap-on-rejected (fn [on-rejected]
                            (let [on-rejected (if (fn? on-rejected) on-rejected (constantly on-rejected))]
                              (vswap! state* update :on-rejected conj on-rejected)
@@ -45,23 +48,23 @@
                                  (if (:committed? state)
                                    (get-in state [:rejected on-rejected])
                                    (ctrl/transact
-                                     ctrl
-                                     (fn []
-                                       (let [rejected (reduce
-                                                        (fn [m f] (assoc m f (f payload)))
-                                                        {}
-                                                        (:on-rejected state))]
-                                         (vswap! state* assoc :committed? true :rejected rejected)
-                                         (ctrl/broadcast ctrl [:funicular/error command-name] payload)
-                                         (get rejected on-rejected)))))))))
+                                    ctrl
+                                    (fn []
+                                      (let [rejected (reduce
+                                                       (fn [m f] (assoc m f (f payload)))
+                                                       {}
+                                                       (:on-rejected state))]
+                                        (vswap! state* assoc :committed? true :rejected rejected)
+                                        (ctrl/broadcast ctrl [:funicular/error command-name] payload)
+                                        (get rejected on-rejected)))))))))
         wrapped-then (fn then
                        ([on-fulfilled] (then on-fulfilled nil))
                        ([on-fulfilled on-rejected]
                         (let [wrapped-on-fulfilled (wrap-on-fulfilled on-fulfilled)
-                              wrapped-on-rejected  (when on-rejected (wrap-on-rejected on-rejected))]
+                              wrapped-on-rejected (when on-rejected (wrap-on-rejected on-rejected))]
                           (.call -then d wrapped-on-fulfilled wrapped-on-rejected))))
         wrapped-catch (fn [on-rejected]
-                        (let [wrapped-on-rejected  (when on-rejected (wrap-on-rejected on-rejected))]
+                        (let [wrapped-on-rejected (when on-rejected (wrap-on-rejected on-rejected))]
                           (.call -catch wrapped-on-rejected)))]
     (gobj/set d "then" wrapped-then)
     (gobj/set d "catch" wrapped-catch)
@@ -82,11 +85,11 @@
   (terminate [this]))
 
 (defprotocol IApi
-  (-req! [this payload]))
+  (-req! [this payload log-success log-error]))
 
 (defprotocol IQueryAttacher
   (-get-command [this])
-  (attach! [this payload]))
+  (attach! [this payload log-success log-error]))
 
 (def default-config
   {:keechma.controller/params true
@@ -98,33 +101,54 @@
 
 (defn request-queries! [{:funicular/keys [url]} {:keys [queries deferred->ids id->aliases]}]
   (->> (fetch/post url (assoc fetch-opts :body {:queries queries}))
-    (p/map extract-result)
-    (p/map (fn [{:keys [queries]}]
-             (doseq [[deferred ids] deferred->ids]
-               (let [deferred-id->aliases (get id->aliases deferred)
-                     deferred-res (reduce
-                                    (fn [acc id]
-                                      (let [r (get queries id)
-                                            aliases (get deferred-id->aliases id)]
-                                        (reduce #(assoc %1 %2 r) acc aliases)))
-                                    {}
-                                    ids)]
-                 (p/resolve! deferred {:queries deferred-res})))))
-    (p/catch (fn [err]
-               (doseq [deferred (vals deferred->ids)]
-                 (p/reject! deferred err))))))
+       (p/map extract-result)
+       (p/map (fn [{:keys [queries]}]
+                (doseq [[deferred ids] deferred->ids]
+                  (let [deferred-id->aliases (get id->aliases deferred)
+                        deferred-res (reduce
+                                       (fn [acc id]
+                                         (let [r (get queries id)
+                                               aliases (get deferred-id->aliases id)]
+                                           (reduce #(assoc %1 %2 r) acc aliases)))
+                                       {}
+                                       ids)]
+                    (p/resolve! deferred {:queries deferred-res})))))
+       (p/error (fn [err]
+                  (doseq [deferred (vals deferred->ids)]
+                    (p/reject! deferred err))))))
 
-(defn deferred-result-handler [{:keys [command queries] :as res}]
+(defn deferred-result-handler [{:keys [queries command] :as res} log-success log-error]
   (let [[_ command-result] command
+
+        ;; This will be set by the `get-reject-pipeline` function
+        command-error (::command-error res)
+        ;; This will be set by the `get-resolve-pipeline` function
+        command-res (::command-res res)
+
         errored-query-result
         (reduce-kv
           (fn [_ _ [_ query-result]]
             (when (contains? query-result :funicular.anomaly/category)
               (reduced query-result)))
           nil
-          queries)]
+          queries)
+        errored-command (contains? command-result :funicular.anomaly/category)]
+
+    (when debug-enabled?
+      (cond
+        (or errored-query-result errored-command)
+        (log-error res)
+
+        command-error
+        (log-error command-error)
+
+        command-res
+        (log-success command-res)
+
+        :else
+        (log-success res)))
     (cond
-      (contains? command-result :funicular.anomaly/category)
+      errored-command
       (p/rejected (ex-info (:funicular.anomaly/message command-result) command-result))
 
       errored-query-result
@@ -132,9 +156,10 @@
 
       :else res)))
 
-(defn deferred-with-result-handler [deferred]
+(defn deferred-with-result-handler [deferred log-success log-error]
   (->> deferred
-    (p/map deferred-result-handler)))
+       (p/map (fn [res]
+                (deferred-result-handler res log-success log-error)))))
 
 (def set-conj (fnil conj #{}))
 
@@ -143,10 +168,10 @@
     (fn [acc query-alias query]
       (let [query-id (or (get-in acc [:query->id query]) (keyword (gensym "req-")))]
         (-> acc
-          (assoc-in [:query->id query] query-id)
-          (update-in [:id->aliases deferred query-id] set-conj query-alias)
-          (update-in [:deferred->ids deferred] set-conj query-id)
-          (assoc-in [:queries query-id] query))))
+            (assoc-in [:query->id query] query-id)
+            (update-in [:id->aliases deferred query-id] set-conj query-alias)
+            (update-in [:deferred->ids deferred] set-conj query-id)
+            (assoc-in [:queries query-id] query))))
     queued
     (:queries payload)))
 
@@ -185,19 +210,23 @@
         val
         (recur (merge-queries queries val))))))
 
-(defn get-reject-pipeline [command-name err]
-  (pipeline! [_ ctrl]
-    (ctrl/broadcast ctrl [:funicular/error command-name] err)
-    (throw err)))
+(defn get-reject-pipeline
+  ([command-name err] (get-reject-pipeline command-name err {:command [command-name err]}))
+  ([command-name err payload]
+   (-> (pipeline! [_ ctrl]
+         (ctrl/broadcast ctrl [:funicular/error command-name] err)
+         (throw err))
+       (assoc ::command-error payload))))
 
 (defn get-resolve-pipeline [command-name {:keys [command] :as payload}]
   (let [[_ command-result] command]
     (if (contains? command-result :funicular.anomaly/category)
       (let [err (p/rejected (ex-info (:funicular.anomaly/message command-result) command-result))]
-        (get-reject-pipeline command-name err))
-      (pipeline! [_ ctrl]
-        (ctrl/broadcast ctrl [:funicular/after command-name] {:command (:command payload)})
-        payload))))
+        (get-reject-pipeline command-name err payload))
+      (-> (pipeline! [_ ctrl]
+            (ctrl/broadcast ctrl [:funicular/after command-name] {:command (:command payload)})
+            payload)
+          (assoc ::command-res payload)))))
 
 (defn request-command! [{:funicular/keys [url] :as ctrl} is-called-from-pipeline {:keys [command] :as payload} deferred]
   (let [[command-name command-payload] command
@@ -207,64 +236,64 @@
         query-attacher (reify IQueryAttacher
                          (-get-command [_]
                            command-payload)
-                         (attach! [_ payload]
+                         (attach! [_ payload log-success log-error]
                            (when (contains? payload :command)
                              (throw (ex-info "Commands can't be attached to another command" {:payload payload})))
                            (let [deferred (p/deferred)]
                              (put! query-collector-chan {:payload payload :deferred deferred})
-                             (deferred-with-result-handler deferred))))]
+                             (deferred-with-result-handler deferred log-success log-error))))]
     (put! query-collector-chan {:payload payload :deferred deferred})
     (ctrl/broadcast ctrl [:funicular/before command-name] query-attacher)
     (go
-      (let [{:keys [queries deferred->ids id->aliases] :as collected} (<! collected-queries-chan)]
+      (let [{:keys [queries deferred->ids id->aliases]} (<! collected-queries-chan)]
         (->> (fetch/post url (assoc fetch-opts :body {:queries (or queries {}) :command command}))
-          (p/map extract-result)
-          (p/map (fn [{:keys [queries command]}]
-                   (when-not command-has-queries
-                     (if is-called-from-pipeline
-                       (p/resolve! deferred (get-resolve-pipeline command-name {:command command}))
-                       (p/resolve! deferred {:command command})))
-                   (doseq [[d ids] deferred->ids]
-                     (let [d-id->aliases (get id->aliases d)
-                           d-res (reduce
-                                   (fn [acc id]
-                                     (let [r (get queries id)
-                                           aliases (get d-id->aliases id)]
-                                       (reduce #(assoc %1 %2 r) acc aliases)))
-                                   {}
-                                   ids)
-                           payload {:queries d-res :command command}]
-                       (if (and (= d deferred) is-called-from-pipeline)
-                         (p/resolve! d (get-resolve-pipeline command-name payload))
-                         (p/resolve! d payload))))))
-          (p/catch (fn [err]
-                     (doseq [d (vals deferred->ids)]
-                       (if (and (= d deferred) is-called-from-pipeline)
-                         (p/reject! d (get-reject-pipeline command-name err))
-                         (p/resolve! d err))))))))))
+             (p/map extract-result)
+             (p/map (fn [{:keys [queries command]}]
+                      (when-not command-has-queries
+                        (if is-called-from-pipeline
+                          (p/resolve! deferred (get-resolve-pipeline command-name {:command command}))
+                          (p/resolve! deferred {:command command})))
+                      (doseq [[d ids] deferred->ids]
+                        (let [d-id->aliases (get id->aliases d)
+                              d-res (reduce
+                                      (fn [acc id]
+                                        (let [r (get queries id)
+                                              aliases (get d-id->aliases id)]
+                                          (reduce #(assoc %1 %2 r) acc aliases)))
+                                      {}
+                                      ids)
+                              payload {:queries d-res :command command}]
+                          (if (and (= d deferred) is-called-from-pipeline)
+                            (p/resolve! d (get-resolve-pipeline command-name payload))
+                            (p/resolve! d payload))))))
+             (p/error (fn [err]
+                        (doseq [d (vals deferred->ids)]
+                          (if (and (= d deferred) is-called-from-pipeline)
+                            (p/reject! d (get-reject-pipeline command-name err))
+                            (p/resolve! d err))))))))))
 
 (defmethod ctrl/api ::controller [{:funicular/keys [url] :as ctrl}]
   (let [query-requester (::query-requester ctrl)]
     (reify IApi
-      (-req! [_ payload]
+      (-req! [_ payload log-success log-error]
         (if (:command payload)
           (let [deferred (p/deferred)
-                is-called-from-pipeline (in-pipeline?) ]
+                is-called-from-pipeline (in-pipeline?)]
             (request-command! ctrl is-called-from-pipeline payload deferred)
             (if is-called-from-pipeline
-              (deferred-with-result-handler deferred)
+              (deferred-with-result-handler deferred log-success log-error)
               (let [deferred-with-hijacked (->> deferred
-                                             deferred-with-result-handler
-                                             (hijack-command-deferred-then-and-catch ctrl payload))]
+                                                (deferred-with-result-handler log-success log-error)
+                                                (hijack-command-deferred-then-and-catch ctrl payload))]
                 ;; Force at least one on-fulfilled and on-rejected handlers so we're
                 ;; sure code in `hijack-command-deferred-then-and-catch` is called
                 (->> deferred-with-hijacked
-                  (p/map identity)
-                  (p/catch identity))
+                     (p/map identity)
+                     (p/error identity))
                 deferred-with-hijacked)))
           (let [deferred (p/deferred)]
             (queue-request query-requester payload deferred)
-            (deferred-with-result-handler deferred)))))))
+            (deferred-with-result-handler deferred log-success log-error)))))))
 
 (defmethod ctrl/init ::controller [ctrl]
   (let [query-requester (make-query-requester ctrl)]
@@ -278,7 +307,7 @@
    (install app {}))
   ([app config]
    (assoc-in app [:keechma/controllers ::controller]
-     (merge default-config config))))
+             (merge default-config config))))
 
 (defn command
   ([command-name payload]
@@ -313,36 +342,79 @@
    (let [[_ res] (get queries query-alias)]
      (or res default))))
 
-(defn req! [{:keechma/keys [app]} payload]
+(defn -internal-req! [{:keechma/keys [app]} payload log-success log-error]
   (let [api* (keechma-pt/-get-api* app ::controller)]
     (if-let [api @api*]
-      (-req! api payload)
+      (-req! api payload log-success log-error)
       ;; Handle the case where this controller is started after the calling controller
       ;; because both might be without deps, which means that the order is nondeterministic
       (let [deferred (p/deferred)]
-        (js/setTimeout #(p/resolve! deferred (-req! @api* payload)) 1)
+        (js/setTimeout #(p/resolve! deferred (-req! @api* payload log-success log-error)) 1)
         deferred))))
+
+(defn req! [ctrl payload]
+  (let [log-success (fn [res]
+                      (l/group-collapsed "%c[REQ]" "color: green" payload)
+                      (l/log "[RES]" res)
+                      (l/group-end))
+        log-error (fn [err]
+                    (l/group-collapsed "%c[REQ]" "color: red" payload)
+                    (l/log "[REQ]" payload)
+                    (l/log "[ERR]" err)
+                    (l/group-end))]
+    (-internal-req! ctrl payload log-success log-error)))
 
 (defn query!
   ([ctrl query-name payload]
    (query! ctrl query-name payload nil))
   ([ctrl query-name payload default]
-   (->> (req! ctrl (query query-name payload))
-     (p/map #(get-query % query-name default)))))
+   (let [log-success (fn [res]
+                       (l/group-collapsed (str "%c[QUERY] " query-name) "color: green")
+                       (l/log "[REQ]" payload)
+                       (l/log "[RES]" (get-query res query-name default))
+                       (l/group-end))
+         log-error (fn [err]
+                     (l/group-collapsed (str "%c[QUERY] " query-name) "color: red")
+                     (l/log "[REQ]" payload)
+                     (l/log "[ERR]" err)
+                     (l/group-end))]
+     (->> (-internal-req! ctrl (query query-name payload) log-success log-error)
+          (p/map #(get-query % query-name default))))))
 
 (defn command!
   ([ctrl command-name payload]
    (command! ctrl command-name payload nil))
   ([ctrl command-name payload default]
-   (->> (req! ctrl (command command-name payload))
-     (p/map (fn [res]
-              (if (pipeline? res)
-                (update-in res [:pipeline :begin] conj (fn [value _] (get-command value default)))
-                (get-command res default)))))))
+   (let [log-success (fn [res]
+                       (l/group-collapsed (str "%c[COMMAND] " command-name) "color: green")
+                       (l/log "[REQ]" payload)
+                       (l/log "[RES]" (get-command res default))
+                       (l/group-end))
+         log-error (fn [err]
+                     (l/group-collapsed (str "%c[COMMAND] " command-name) "color: red")
+                     (l/log "[REQ]" payload)
+                     (l/log "[ERR]" err)
+                     (l/group-end))
+         req (-internal-req! ctrl (command command-name payload) log-success log-error)]
+     (->> req
+          (p/map (fn [res]
+                   (if (pipeline? res)
+                     (update-in res [:pipeline :begin] conj (fn [value _] (get-command value default)))
+                     (get-command res default))))))))
 
 (defn attach-query!
   ([value query-name payload]
    (attach-query! value query-name payload nil))
   ([value query-name payload default]
-   (->> (attach! value (query query-name payload))
-     (p/map #(get-query % query-name default)))))
+   (let [log-success (fn [res]
+                       (l/group-collapsed (str "%c[ATTACHED QUERY] " query-name) "color: green")
+                       (l/log "[REQ]" payload)
+                       (l/log "[RES]" (get-query res query-name default))
+                       (l/group-end))
+         log-error (fn [err]
+                     (l/group-collapsed (str "%c[ATTACHED QUERY] " query-name) "color: red")
+                     (l/log "[REQ]" payload)
+                     (l/log "[ERR]" err)
+                     (l/group-end))]
+     (->> (attach! value (query query-name payload) log-success log-error)
+          (p/map #(get-query % query-name default))))))
