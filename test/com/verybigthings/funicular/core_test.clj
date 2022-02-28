@@ -131,3 +131,8 @@
         res (core/execute f {} {:command [:api.articles/create {:app/article {:article/title "My article"}
                                                                 :app/token token}]})]
     (is (= {:command [:api.articles/create {:article/title "My article"}]} res))))
+
+
+(comment
+  (require '[kaocha.repl :as k])
+  (k/run 'com.verybigthings.funicular.core-test/interceptors-rules))
