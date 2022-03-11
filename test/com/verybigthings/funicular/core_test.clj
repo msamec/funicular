@@ -9,6 +9,8 @@
 
 (s/check-asserts true)
 
+; --- COMMAND TESTS ---
+
 (def db* (atom nil))
 
 (defn clear-db-fixture [f]
@@ -19,7 +21,7 @@
 
 (def uuid-1 (java.util.UUID/fromString "a60f3aa2-876c-11eb-8dcd-0242ac130003"))
 
-(def schema-registry
+(def schema-registry-commands
   (merge
     (m/default-schemas)
     {:app/token :string
@@ -100,12 +102,12 @@
                                :handler create-article}}}]]})
 
 (deftest ping
-  (let [f (core/compile funicular-1 {:malli/registry schema-registry})]
+  (let [f (core/compile funicular-1 {:malli/registry schema-registry-commands})]
     (is (= {:command [:api/ping :pong]}
           (core/execute f {} {:command [:api/ping {}]})))))
 
 (deftest register
-  (let [f (core/compile funicular-1 {:malli/registry schema-registry})]
+  (let [f (core/compile funicular-1 {:malli/registry schema-registry-commands})]
     (is (= {:command [:api.session/register {:app/token "TOKEN-1"
                                              :user/id uuid-1}]}
           (core/execute f {} {:command [:api.session/register {:user/email "email@example.com"
@@ -113,10 +115,8 @@
                                                                :user/password2 "12345678"}]})))))
 
 (deftest register-error
-  (let [f (core/compile funicular-1 {:malli/registry schema-registry})]
-    (is (= {:command [:api.session/register {:funicular/errors {[:user/password] ["password is too short"],
-                                                                [:user/password2] ["password is too short"
-                                                                                   "passwords don't match"]}
+  (let [f (core/compile funicular-1 {:malli/registry schema-registry-commands})]
+    (is (= {:command
                                              :funicular.anomaly/category :funicular.anomaly.category/incorrect
                                              :funicular.anomaly/message "Invalid input"
                                              :funicular.anomaly/subcategory :funicular.anomaly.category.incorrect/input-data}]}
@@ -124,7 +124,7 @@
                                                                :user/password "1234567"
                                                                :user/password2 "123456"}]})))))
 (deftest interceptors-rules
-  (let [f (core/compile funicular-1 {:malli/registry schema-registry})
+  (let [f (core/compile funicular-1 {:malli/registry schema-registry-commands})
         {[_ {:app/keys [token]}] :command} (core/execute f {} {:command [:api.session/register {:user/email "email@example.com"
                                                                                                 :user/password "12345678"
                                                                                                 :user/password2 "12345678"}]})
@@ -132,7 +132,55 @@
                                                                 :app/token token}]})]
     (is (= {:command [:api.articles/create {:article/title "My article"}]} res))))
 
+; --- QUERY TESTS ---
+
+(defn repeat-letter [len ord]
+  (apply str (take len (repeatedly #(char (+ ord 65))))))
+
+(def quasi-word (partial repeat-letter 3))
+
+(def schema-registry-queries
+  (merge
+   (m/default-schemas)
+   {:app/seed :int
+    :app/generated-numbers [:vector :int]
+    :app/generated-words [:vector :string]}))
+
+(def funicular-2
+  {:api
+   [:api
+    [:example
+     {:queries
+      {:make-numbers {:input-schema :app/seed
+                      :output-schema :app/generated-numbers
+                      :handler (fn [{times :data}] (vec (range times)))}
+       :make-words {:input-schema :app/seed
+                    :output-schema :app/generated-words
+                    :handler (fn [{times :data}] (mapv quasi-word (range times)))}}}]]})
+
+(deftest simple-query
+  (let [cf (core/compile funicular-2 {:malli/registry schema-registry-queries})]
+    (is (= {:queries {:return-here-pls [:api.example/make-numbers [0 1 2]]}}
+           (core/execute cf {}
+                         {:queries
+                          {:return-here-pls
+                           [:api.example/make-numbers 3]}})))))
+
+(deftest multiple-queries
+  (let [cf (core/compile funicular-2 {:malli/registry schema-registry-queries})]
+    (is (= {:queries {:numbers [:api.example/make-numbers [0 1 2]]
+                      :words [:api.example/make-words ["AAA" "BBB" "CCC"]]}}
+           (core/execute cf {}
+                         {:queries
+                          {:numbers
+                           [:api.example/make-numbers 3]
+                           :words
+                           [:api.example/make-words 3]}})))))
 
 (comment
   (require '[kaocha.repl :as k])
-  (k/run 'com.verybigthings.funicular.core-test/interceptors-rules))
+  (k/run-all)
+  (k/run 'com.verybigthings.funicular.core-test/ping)
+  (k/run 'com.verybigthings.funicular.core-test/interceptors-rules)
+  (k/run 'com.verybigthings.funicular.core-test/simple-query)
+  (k/run 'com.verybigthings.funicular.core-test/multiple-queries))
