@@ -196,7 +196,10 @@
     (update acc :path conj context-name)
     acc))
 
-(defn with-interceptors [acc {:keys [interceptors]}]
+(defn with-interceptors
+  "Collects all interceptors in order of doc traversal into a flat list.
+   This list gets forwarded into Sieppari for execution."
+  [acc {:keys [interceptors]}]
   (update acc :interceptors #(-> (concat % interceptors) vec)))
 
 (def set-conj (fnil conj #{}))
@@ -239,7 +242,11 @@
           (mapv (fn [[k v]] [k (-> v sort vec)]))
           (into {}))))))
 
-(defn with-input-schema-interceptor [{:keys [input-schemas] :as acc} {:malli/keys [registry]}]
+(defn with-input-schema-interceptor
+  "Given that an input schema is present on the current node,
+   injects a new `:enter` interceptor that validates
+   the input schema for the given context at runtime"
+  [{:keys [input-schemas] :as acc} {:malli/keys [registry]}]
   (if (seq input-schemas)
     (let [malli-opts {:registry registry}
           validator-explainer (schemas->validator-explainer input-schemas malli-opts)
@@ -256,7 +263,11 @@
       (update acc :interceptors #(into [interceptor] %)))
     acc))
 
-(defn with-output-schema-interceptor [{:keys [output-schemas] :as acc} {:malli/keys [registry]}]
+(defn with-output-schema-interceptor
+  "Given that an output schema is present on the current node,
+   injects a new ':leave' interceptor that validates
+   the output schema for the given context at runtime."
+  [{:keys [output-schemas] :as acc} {:malli/keys [registry]}]
   (if (seq output-schemas)
     (let [malli-opts {:registry registry}
           funiculary-anomaly-validator (m/validator FunicularAnomaly)
@@ -275,8 +286,10 @@
       (update acc :interceptors conj interceptor))
     acc))
 
-
-(defn with-schema [acc {:keys [input-schema output-schema]} opts]
+(defn with-schema
+  "Appends the schemas present on the current node
+   onto a list of either input or output schemas."
+  [acc {:keys [input-schema output-schema]} opts]
   (cond-> acc
     input-schema
     (update :input-schemas conj input-schema)
@@ -290,7 +303,12 @@
       (keyword resolver-ns (name resolver-name)))
     resolver-name))
 
-(defn with-rules [acc {:keys [rules]} opts]
+(defn with-rules
+  "Builds a Sieppari interceptor based on the rule definition.
+   At runtime, the interceptor checks if the rule is satisfied.
+   If the rule fails, an early exit happens and no further
+   interceptors are executed."
+  [acc {:keys [rules]} opts]
   (let [interceptor (fn [{:keys [request] :as ctx}]
                       (if rules
                         (if (enforce-rule request rules)
@@ -365,7 +383,9 @@
     {}
     pipes))
 
-(defn compile [funicular-def opts]
+(defn compile
+  "Compiles the Funicular definition file into a data struture that can be executed by `execute`"
+  [funicular-def opts]
   (s/assert ::funicular funicular-def)
   (let [conformed-funicular (s/conform ::funicular funicular-def)
         api (:api conformed-funicular)
