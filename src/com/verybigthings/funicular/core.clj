@@ -317,7 +317,9 @@
                         ctx))]
     (update acc :interceptors conj {:enter interceptor})))
 
-(defn with-resolvers [acc resolver-type props opts]
+(defn with-resolvers
+  "Compiles command and query resolvers"
+  [acc resolver-type props opts]
   (reduce-kv
     (fn [acc' resolver-name {:keys [handler] :as resolver}]
       (let [{:keys [interceptors input-schemas output-schemas]}
@@ -347,7 +349,9 @@
 
 (declare compile-api)
 
-(defn with-api-subcontexts [acc {:keys [api-subcontexts]} opts]
+(defn with-api-subcontexts
+  "Compiles the child subcontexts (all document nodes below the current node)."
+  [acc {:keys [api-subcontexts]} opts]
   (reduce
     (fn [acc' api-subcontext]
       (let [resolvers (:resolvers (compile-api acc' api-subcontext opts))]
@@ -356,6 +360,7 @@
     api-subcontexts))
 
 (defn compile-api
+  "Compiles the `:api` section of the Funicular document"
   ([context opts] (compile-api {:path [] :interceptors [] :input-schemas [] :output-schemas []} context opts))
   ([acc {:keys [props] :as context} opts]
    (-> acc
@@ -367,7 +372,9 @@
      (with-resolvers :queries props opts)
      (with-api-subcontexts context opts))))
 
-(defn compile-pipes [pipes resolvers opts]
+(defn compile-pipes
+  "Compiles the `:pipes` section of the Funicular document"
+  [pipes resolvers opts]
   (reduce-kv
     (fn [acc source->target pipe]
       (let [[source target] source->target]
