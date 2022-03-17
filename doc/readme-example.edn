@@ -1,0 +1,32 @@
+{:api
+ [:api-v1
+  [:content
+   {:interceptors [{:enter log-content-fetch}]
+    :input-schema [:map [:app/token {:optional true}]]
+    :queries
+    {:get-numbers
+     {:input-schema :int
+      :output-schema [:vector :int]
+      :handler (fn [{times :data}] (vec (range times)))}
+     :get-words
+     {:input-schema :app/seed
+      :output-schema :app/generated-words
+      :handler (fn [{times :data}] (mapv make-word (range times)))}}}]
+  [:tracking
+   {:rules logged-in?
+    :commands
+    {:log-visitor
+     {:input-schema [:map [:page] :string]
+      :output-schema :int
+      :handler (fn [data] (log-site-visit data))}}}]
+  [:util
+   {:queries
+    {:foo
+     {:input-schema :any
+      :output-schema :string
+      :handler (fn [_] :bar)}}
+    :commands
+    {:ping
+     {:input-schema :any
+      :output-schema [:fn #(= % :pong)]
+      :handler (fn [_] :pong)}}}]]}
