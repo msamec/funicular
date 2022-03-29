@@ -12,6 +12,13 @@ Build a deployable jar of this library:
 
     $ clojure -A:jar
 
+## Contributions / development
+
+Run tests with
+```
+./bin/kaocha
+```
+
 ## License
 
 Copyright © 2021 Retro
