@@ -179,10 +179,57 @@
                            :words
                            [:api.example/make-words 3]}})))))
 
+; --- PIPES TESTS ---
+
+(defn merge-command-response [{:keys [command] :as request}]
+  (update request :data merge (:response command)))
+
+(def fun-word {:app/word "funicular"
+               :app/definition "(of a railway, especially one on a mountainside) operating by cable with ascending and descending cars counterbalanced."
+               :app/synonyms ["cableway", "wireway", "cablecar"]})
+
+(def schema-registry-pipes
+  (merge
+   (m/default-schemas)
+   {:app/dict-entry [:map
+                     [:app/word {:optional true}]
+                     :app/definition
+                     :app/synonyms]
+    :app/word :string
+    :app/definition :string
+    :app/synonyms [:vector :string]}))
+
+(def funicular-pipes
+  {:api
+   [:api
+    [:dictionary
+     {:queries
+      {:lookup-word {:input-schema :app/word
+                     :output-schema :app/dict-entry
+                     :handler (fn [_] fun-word)}
+       :word-count {:input-schema :any
+                    :output-schema :int
+                    :handler (fn [_] 1)}}
+      :commands
+      {:new-dict-entry {:input-schema :app/dict-entry
+                        :output-schema :any
+                        :handler (fn [_] {})}}}]]
+   :pipes {[:api.dictionary/new-dict-entry :api.dictionary/word-count]
+           merge-command-response}})
+
+(deftest pipes
+  (let [cf (core/compile funicular-pipes {:malli/registry schema-registry-pipes})]
+    (is (= {:command [:api.dictionary/new-dict-entry {}]
+            :queries {:word-count [:api.dictionary/word-count 1]}}
+           (core/execute cf {}
+                         {:command [:api.dictionary/new-dict-entry fun-word]
+                          :queries {:word-count [:api.dictionary/word-count {}]}})))))
+
 (comment
   (require '[kaocha.repl :as k])
   (k/run-all)
   (k/run 'com.verybigthings.funicular.core-test/ping)
   (k/run 'com.verybigthings.funicular.core-test/interceptors-rules)
   (k/run 'com.verybigthings.funicular.core-test/simple-query)
-  (k/run 'com.verybigthings.funicular.core-test/multiple-queries))
+  (k/run 'com.verybigthings.funicular.core-test/multiple-queries)
+  (k/run 'com.verybigthings.funicular.core-test/pipes))
