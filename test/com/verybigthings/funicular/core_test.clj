@@ -83,7 +83,7 @@
 (defn logged-in? [req]
   (-> req :current-user boolean))
 
-(def funicular-1
+(def funicular-commands
   {:api [:api
          {:interceptors [{:enter assoc-current-user}]
           :input-schema :app.input/token
@@ -102,12 +102,12 @@
                                :handler create-article}}}]]})
 
 (deftest ping
-  (let [f (core/compile funicular-1 {:malli/registry schema-registry-commands})]
+  (let [f (core/compile funicular-commands {:malli/registry schema-registry-commands})]
     (is (= {:command [:api/ping :pong]}
           (core/execute f {} {:command [:api/ping {}]})))))
 
 (deftest register
-  (let [f (core/compile funicular-1 {:malli/registry schema-registry-commands})]
+  (let [f (core/compile funicular-commands {:malli/registry schema-registry-commands})]
     (is (= {:command [:api.session/register {:app/token "TOKEN-1"
                                              :user/id uuid-1}]}
           (core/execute f {} {:command [:api.session/register {:user/email "email@example.com"
@@ -115,16 +115,18 @@
                                                                :user/password2 "12345678"}]})))))
 
 (deftest register-error
-  (let [f (core/compile funicular-1 {:malli/registry schema-registry-commands})]
-    (is (= {:command
+  (let [f (core/compile funicular-commands {:malli/registry schema-registry-commands})]
+    (is (= {:command [:api.session/register {:funicular/errors {[:user/password] ["password is too short"],
+                                                                [:user/password2] ["password is too short"
+                                                                                   "passwords don't match"]}
                                              :funicular.anomaly/category :funicular.anomaly.category/incorrect
                                              :funicular.anomaly/message "Invalid input"
                                              :funicular.anomaly/subcategory :funicular.anomaly.category.incorrect/input-data}]}
-          (core/execute f {} {:command [:api.session/register {:user/email "email@example.com"
-                                                               :user/password "1234567"
-                                                               :user/password2 "123456"}]})))))
+           (core/execute f {} {:command [:api.session/register {:user/email "email@example.com"
+                                                                :user/password "1234567"
+                                                                :user/password2 "123456"}]})))))
 (deftest interceptors-rules
-  (let [f (core/compile funicular-1 {:malli/registry schema-registry-commands})
+  (let [f (core/compile funicular-commands {:malli/registry schema-registry-commands})
         {[_ {:app/keys [token]}] :command} (core/execute f {} {:command [:api.session/register {:user/email "email@example.com"
                                                                                                 :user/password "12345678"
                                                                                                 :user/password2 "12345678"}]})
@@ -146,7 +148,7 @@
     :app/generated-numbers [:vector :int]
     :app/generated-words [:vector :string]}))
 
-(def funicular-2
+(def funicular-queries
   {:api
    [:api
     [:example
@@ -159,7 +161,7 @@
                     :handler (fn [{times :data}] (mapv quasi-word (range times)))}}}]]})
 
 (deftest simple-query
-  (let [cf (core/compile funicular-2 {:malli/registry schema-registry-queries})]
+  (let [cf (core/compile funicular-queries {:malli/registry schema-registry-queries})]
     (is (= {:queries {:return-here-pls [:api.example/make-numbers [0 1 2]]}}
            (core/execute cf {}
                          {:queries
@@ -167,7 +169,7 @@
                            [:api.example/make-numbers 3]}})))))
 
 (deftest multiple-queries
-  (let [cf (core/compile funicular-2 {:malli/registry schema-registry-queries})]
+  (let [cf (core/compile funicular-queries {:malli/registry schema-registry-queries})]
     (is (= {:queries {:numbers [:api.example/make-numbers [0 1 2]]
                       :words [:api.example/make-words ["AAA" "BBB" "CCC"]]}}
            (core/execute cf {}
