@@ -23,52 +23,52 @@
 
 (def schema-registry-commands
   (merge
-    (m/default-schemas)
-    {:app/token :string
-     :app/pong [:and
-                :keyword
-                [:fn #(= % :pong)]]
-     :app/session [:map
-                   :user/id
-                   :app/token]
+   (m/default-schemas)
+   {:app/token :string
+    :app/pong [:and
+               :keyword
+               [:fn #(= % :pong)]]
+    :app/session [:map
+                  :user/id
+                  :app/token]
 
-     :app.input/token [:map
-                       [:app/token {:optional true}]]
+    :app.input/token [:map
+                      [:app/token {:optional true}]]
 
-     :app.input/register [:and
-                          :app/user
-                          [:map
-                           :user/password2]
-                          [:fn {:error/message "passwords don't match"
-                                :error/path [:user/password2]}
-                           (fn [{:user/keys [password password2]}]
-                             (= password password2))]]
+    :app.input/register [:and
+                         :app/user
+                         [:map
+                          :user/password2]
+                         [:fn {:error/message "passwords don't match"
+                               :error/path [:user/password2]}
+                          (fn [{:user/keys [password password2]}]
+                            (= password password2))]]
 
-     :app.input.articles/create [:map
-                                 :app/article]
+    :app.input.articles/create [:map
+                                :app/article]
 
 
-     :app/user [:map
-                :user/email
-                :user/password]
+    :app/user [:map
+               :user/email
+               :user/password]
 
-     :app/article [:map
-                   :article/title]
+    :app/article [:map
+                  :article/title]
 
-     :article/title :string
-     :user/id :uuid
-     :user/email :string
-     :user/password [:and
-                     :string
-                     [:fn {:error/message "password is too short"} #(<= 8 (count %))]]
-     :user/password2 :user/password}))
+    :article/title :string
+    :user/id :uuid
+    :user/email :string
+    :user/password [:and
+                    :string
+                    [:fn {:error/message "password is too short"} #(<= 8 (count %))]]
+    :user/password2 :user/password}))
 
 (defn register [{:keys [data]}]
   (let [{:user/keys [email password]} data
         token "TOKEN-1"]
     (swap! db* #(-> %
-                  (assoc-in [:users uuid-1] {:user/id uuid-1 :user/email email :user/password password})
-                  (assoc-in [:tokens token] uuid-1)))
+                    (assoc-in [:users uuid-1] {:user/id uuid-1 :user/email email :user/password password})
+                    (assoc-in [:tokens token] uuid-1)))
     {:user/id uuid-1
      :app/token token}))
 
@@ -104,15 +104,15 @@
 (deftest ping
   (let [f (core/compile funicular-commands {:malli/registry schema-registry-commands})]
     (is (= {:command [:api/ping :pong]}
-          (core/execute f {} {:command [:api/ping {}]})))))
+           (core/execute f {} {:command [:api/ping {}]})))))
 
 (deftest register
   (let [f (core/compile funicular-commands {:malli/registry schema-registry-commands})]
     (is (= {:command [:api.session/register {:app/token "TOKEN-1"
                                              :user/id uuid-1}]}
-          (core/execute f {} {:command [:api.session/register {:user/email "email@example.com"
-                                                               :user/password "12345678"
-                                                               :user/password2 "12345678"}]})))))
+           (core/execute f {} {:command [:api.session/register {:user/email "email@example.com"
+                                                                :user/password "12345678"
+                                                                :user/password2 "12345678"}]})))))
 
 (deftest register-error
   (let [f (core/compile funicular-commands {:malli/registry schema-registry-commands})]
@@ -209,21 +209,26 @@
                      :handler (fn [_] fun-word)}
        :word-count {:input-schema :any
                     :output-schema :int
-                    :handler (fn [_] 1)}}
+                    ;; read :app/word from the data returned from the command and count it. Without
+                    ;; the pipe, this data wouldn't be available in the query. We increment the 
+                    ;; count by the amount passed directly to the query on the `:inc-by` key
+                    :handler (fn [{:keys [data]}]
+                               (+ (:inc-by data) (-> data :app/word count)))}}
       :commands
       {:new-dict-entry {:input-schema :app/dict-entry
                         :output-schema :any
-                        :handler (fn [_] {})}}}]]
+                        ;; return the data sent into the command with the modified word
+                        :handler (fn [{:keys [data]}] (update data :app/word #(str % "!")))}}}]]
    :pipes {[:api.dictionary/new-dict-entry :api.dictionary/word-count]
            merge-command-response}})
 
 (deftest pipes
   (let [cf (core/compile funicular-pipes {:malli/registry schema-registry-pipes})]
-    (is (= {:command [:api.dictionary/new-dict-entry {}]
-            :queries {:word-count [:api.dictionary/word-count 1]}}
+    (is (= {:command [:api.dictionary/new-dict-entry (assoc fun-word :app/word "funicular!")]
+            :queries {:word-count [:api.dictionary/word-count 12]}}
            (core/execute cf {}
                          {:command [:api.dictionary/new-dict-entry fun-word]
-                          :queries {:word-count [:api.dictionary/word-count {}]}})))))
+                          :queries {:word-count [:api.dictionary/word-count {:inc-by 2}]}})))))
 
 (comment
   (require '[kaocha.repl :as k])
