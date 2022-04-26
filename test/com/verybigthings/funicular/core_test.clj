@@ -4,7 +4,8 @@
             [com.verybigthings.funicular.core :as core]
             [com.verybigthings.funicular.test-fixtures :refer [dictionary]]
             [malli.core :as m]
-            [expound.alpha :as expound]))
+            [expound.alpha :as expound]
+            [clojure.set :as set]))
 
 (set! s/*explain-out* expound/printer)
 
@@ -201,24 +202,16 @@
   data)
 
 (defn related-entries-handler [{:keys [data]}]
-  (loop [[related-word & others] (:app/related data)
-         result []
-         visited-words []]
-    (let [related-word-def (get @db* related-word)
-          root-word (:app/word data)]
-      (cond
-        (= related-word root-word) result
-        (empty? related-word) result
-        (nil? related-word-def) result
-        (contains? visited-words related-word) result
-        (seq related-word-def) (recur
-                       (concat others (:app/related related-word-def))
-                       (conj result (:app/word related-word-def))
-                       (conj visited-words (:app/word related-word-def)))
-        :else (recur
-               others
-               result
-               (conj visited-words related-word))))))
+  (let [db @db*
+        words (:app/related data)]
+    (loop [words words
+           result (set words)]
+      (let [[word & rest-words] words
+            related (set/difference (set (get-in db [word :app/related])) result)
+            to-visit (into rest-words related)]
+        (if (seq to-visit)
+          (recur to-visit (set/union result related))
+          result)))))
 
 (def funicular-pipes
   {:api
@@ -242,10 +235,11 @@
         res4 (core/execute cf {} {:command [:api.dictionary/new-dict-entry (:funicular dictionary)]
                                   :queries {:related-entries [:api.dictionary/related-entries {}]}})]
     (is (= {:command [:api.dictionary/new-dict-entry (:funicular dictionary)]
-            :queries {:related-entries [:api.dictionary/related-entries ["api", "graphql", "restful api"]]}}
+            :queries {:related-entries [:api.dictionary/related-entries #{"api" "funicular" "graphql" "restful api" "soap"}]}}
            res4))))
 
 (comment
+
   (require '[kaocha.repl :as k])
   (k/run-all)
   (k/run 'com.verybigthings.funicular.core-test/ping)
