@@ -404,9 +404,10 @@
                   context' (-> (if command
                                  (assoc context :command {:name command-name :response command-res})
                                  context)
-                             (assoc :query query-name))
+                              (assoc :query query-name)
+                              (assoc :data query-data))
                   chain' (if pipe (into [pipe] chain) chain)
-                  res (si/execute chain' (assoc context' :data query-data))]
+                 res (si/execute chain' context')]
               (assoc-in acc' [:queries query-alias] [query-name res]))
             (assoc-in acc' [:queries query-alias] [query-name (anom/not-found "Query not found" (make-missing-query-error query-name query-data))]))))
       acc
