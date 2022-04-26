@@ -219,7 +219,7 @@
     [:dictionary
      {:queries
       {:related-entries {:input-schema :app/dict-entry
-                         :output-schema [:vector :app/word]
+                         :output-schema [:set :app/word]
                          :handler related-entries-handler}}
       :commands
       {:new-dict-entry {:input-schema :app/dict-entry
