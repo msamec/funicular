@@ -2,6 +2,7 @@
   (:require [clojure.test :refer :all]
             [clojure.spec.alpha :as s]
             [com.verybigthings.funicular.core :as core]
+            [com.verybigthings.funicular.test-fixtures :refer [dictionary]]
             [malli.core :as m]
             [expound.alpha :as expound]))
 
@@ -181,54 +182,68 @@
 
 ; --- PIPES TESTS ---
 
-(defn merge-command-response [{:keys [command] :as request}]
-  (update request :data merge (:response command)))
-
-(def fun-word {:app/word "funicular"
-               :app/definition "(of a railway, especially one on a mountainside) operating by cable with ascending and descending cars counterbalanced."
-               :app/synonyms ["cableway", "wireway", "cablecar"]})
-
 (def schema-registry-pipes
   (merge
    (m/default-schemas)
    {:app/dict-entry [:map
-                     [:app/word {:optional true}]
+                     :app/word
                      :app/definition
-                     :app/synonyms]
+                     [:app/related {:optional true :default []}]]
     :app/word :string
     :app/definition :string
-    :app/synonyms [:vector :string]}))
+    :app/related [:vector :string]}))
+
+(defn merge-cmd-response [{:keys [command] :as request}]
+  (update request :data merge (:response command)))
+
+(defn new-entry-handler [{:keys [data]}]
+  (swap! db* assoc (:app/word data) data)
+  data)
+
+(defn related-entries-handler [{:keys [data]}]
+  (loop [[related-word & others] (:app/related data)
+         result []
+         visited-words []]
+    (let [related-word-def (get @db* related-word)
+          root-word (:app/word data)]
+      (cond
+        (= related-word root-word) result
+        (empty? related-word) result
+        (nil? related-word-def) result
+        (contains? visited-words related-word) result
+        (seq related-word-def) (recur
+                       (concat others (:app/related related-word-def))
+                       (conj result (:app/word related-word-def))
+                       (conj visited-words (:app/word related-word-def)))
+        :else (recur
+               others
+               result
+               (conj visited-words related-word))))))
 
 (def funicular-pipes
   {:api
    [:api
     [:dictionary
      {:queries
-      {:lookup-word {:input-schema :app/word
-                     :output-schema :app/dict-entry
-                     :handler (fn [_] fun-word)}
-       :word-count {:input-schema :any
-                    :output-schema :int
-                    ;; read :app/word from the data returned from the command and count it. Without
-                    ;; the pipe, this data wouldn't be available in the query. We increment the 
-                    ;; count by the amount passed directly to the query on the `:inc-by` key
-                    :handler (fn [{:keys [data]}]
-                               (+ (:inc-by data) (-> data :app/word count)))}}
+      {:related-entries {:input-schema :app/dict-entry
+                         :output-schema [:vector :app/word]
+                         :handler related-entries-handler}}
       :commands
       {:new-dict-entry {:input-schema :app/dict-entry
-                        :output-schema :any
-                        ;; return the data sent into the command with the modified word
-                        :handler (fn [{:keys [data]}] (update data :app/word #(str % "!")))}}}]]
-   :pipes {[:api.dictionary/new-dict-entry :api.dictionary/word-count]
-           merge-command-response}})
+                        :output-schema :app/dict-entry
+                        :handler new-entry-handler}}}]]
+   :pipes {[:api.dictionary/new-dict-entry :api.dictionary/related-entries] merge-cmd-response}})
 
 (deftest pipes
-  (let [cf (core/compile funicular-pipes {:malli/registry schema-registry-pipes})]
-    (is (= {:command [:api.dictionary/new-dict-entry (assoc fun-word :app/word "funicular!")]
-            :queries {:word-count [:api.dictionary/word-count 12]}}
-           (core/execute cf {}
-                         {:command [:api.dictionary/new-dict-entry fun-word]
-                          :queries {:word-count [:api.dictionary/word-count {:inc-by 2}]}})))))
+  (let [cf (core/compile funicular-pipes {:malli/registry schema-registry-pipes})
+        _res1 (core/execute cf {} {:command [:api.dictionary/new-dict-entry (:graphql dictionary)]})
+        _res2 (core/execute cf {} {:command [:api.dictionary/new-dict-entry (:restful-api dictionary)]})
+        _res3 (core/execute cf {} {:command [:api.dictionary/new-dict-entry (:api dictionary)]})
+        res4 (core/execute cf {} {:command [:api.dictionary/new-dict-entry (:funicular dictionary)]
+                                  :queries {:related-entries [:api.dictionary/related-entries {}]}})]
+    (is (= {:command [:api.dictionary/new-dict-entry (:funicular dictionary)]
+            :queries {:related-entries [:api.dictionary/related-entries ["api", "graphql", "restful api"]]}}
+           res4))))
 
 (comment
   (require '[kaocha.repl :as k])
