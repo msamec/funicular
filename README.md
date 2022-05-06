@@ -38,7 +38,15 @@ An example of a document with 2 queries and 2 commands:
      :get-words
      {:input-schema :app/seed
       :output-schema :app/generated-words
-      :handler (fn [{times :data}] (mapv make-word (range times)))}}}]
+      :handler (fn [{times :data}] (mapv make-word (range times)))}}}
+   [:<>
+    {:rules        logged-in?
+     :commands     {}
+     :queries
+     {:get-stats
+      {:input-schema  :any
+       :output-schema [:vector :int]
+       :handler       (fn [{times :data}] (vec (range times)))}}}]]
   [:tracking
    {:rules logged-in?
     :commands
@@ -99,6 +107,8 @@ We will ignore document structure nodes for now and focus on **contexts** and **
 Context nodes are useful for grouping related application logic in one place and applying the same rules to all commands and queries that live in the same context.
 
 Referring back to the above example, the interceptor `log-content-fetch` is executed for both `:get-number` and `:get-word` resolvers since those two reside in the same (`:content`) context. Since `log-content-fetch` is an `:enter` interceptor it's executed any of the resolvers is executed.
+
+There is also a special character `:<>`. This enables additional resolvers within same context but with different node configurations. For example you might have `:user` context that can have `:create` and `:update` resolovers. Usually for create you do not have to be looged in but to update you have to. This is a perfect place to use `:<>` because within same `:user` context we can have `:create` which has no `:rules` and `:update` which has rule `logged-in?`
 
 Context nodes can have:
 * **input and output schemas** - data validators that are executed before or after the resolver

@@ -11,7 +11,15 @@
      :get-words
      {:input-schema :app/seed
       :output-schema :app/generated-words
-      :handler (fn [{times :data}] (mapv make-word (range times)))}}}]
+      :handler (fn [{times :data}] (mapv make-word (range times)))}}}
+   [:<>
+    {:rules        logged-in?
+     :commands     {}
+     :queries
+     {:get-stats
+      {:input-schema  :any
+       :output-schema [:vector :int]
+       :handler       (fn [{times :data}] (vec (range times)))}}}]]
   [:tracking
    {:rules logged-in?
     :commands
